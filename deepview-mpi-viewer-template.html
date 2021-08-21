@@ -1,0 +1,771 @@
+<!DOCTYPE html>
+<html><head>
+<meta http-equiv="content-type" content="text/html; charset=UTF-8"><meta charset="utf-8">
+<title>DeepView MPI viewer</title>
+<style>
+body {
+  user-select: none; -webkit-user-select: none;
+  font-family: Helvetica, "Helvetica Neue", sans-serif;
+  font-size: 18px;
+  line-height: 1.3em;
+  background: #bbb;
+  padding: 20px;
+  margin: 0;
+}
+svg {
+  display: none;
+}
+.ts { padding-right: 1px;}
+
+#error {
+  display: none;
+  position: fixed;
+  top: 20px; left: 20px; right: 20px; bottom: 20px;
+  background: #444;
+  padding: 8px;
+  white-space: pre;
+  color: #fff;
+  font-family: monospace;
+  font-weight: bold;
+}
+
+#info {
+  padding-bottom: 8px;
+  word-break: break-all;
+  padding-right: 50px;
+}
+#info #url {
+  font-size: 14px;
+  line-height: 14px;
+}
+#info #url, #info #num, #info #width, #info #height, #info #url {
+  font-weight: bold;
+}
+/* The main MPI view */
+.view {
+  position: absolute;
+  border: 3px solid #000;
+  overflow: hidden;
+  transform-origin: top left;
+}
+.view[nav="0"] { cursor: crosshair; }
+.view[nav="1"] { cursor: grab; }
+
+.viewspace[size="0"] .view { transform: scale(0.5); }
+.viewspace[size="2"] .view { transform: scale(2.0); }
+.viewspace div.whole {
+  display: none;
+}
+.viewspace[size="0"] div.half { display: none; }
+.viewspace[size="2"] div.whole { display: block; }
+
+.mpi, .view {
+  transform-style: preserve-3d;
+  -webkit-transform-style: preserve-3d;
+}
+.mpi * {
+  position: absolute;
+  background-size: 100% 100%;
+  background-repeat: no-repeat;
+  background-position: center;
+  width: 100%;
+  height: 100%;
+}
+
+/* Button styling */
+.minis a,
+.controls a {
+  font-size: 12px;
+  font-weight: bold;
+  text-transform: uppercase;
+  padding: 4px 8px;
+  border-radius: 4px;
+  line-height: 30px;
+  cursor: pointer;
+  background: #ddd;
+  color: #333;
+}
+#minimodes, #backgroundmodes, #behindmodes, #frontmodes {
+  display: inline-block;
+}
+a:active {
+  background: #000;
+  color: #fff;
+}
+a.on {
+  color: #fff;
+  background: #444;
+}
+
+/* Layer thumbnails ("minis"). */
+.minis .group {
+  display: inline-block;
+  white-space: nowrap;
+}
+.minis .row {
+  display: inline-block;
+  position: relative;
+  overflow: hidden;
+  border: 1px solid black;
+  margin: 0 4px 4px 0;
+}
+.minis[selected="0"] .row:hover,
+.minis .row[selected] { border-color: red; }
+.minis .row:active { border-color: white !important; }
+.minis .thumb {
+  display: inline-block;
+  background-size: 100% 100%;
+  vertical-align: top;
+}
+.minis .num {
+  position: absolute;
+  top: 0;
+  left: 0;
+  font-size: 12px;
+  font-weight: bold;
+  padding: 1px 3px 1px 2px;
+  background: #444;
+  color: #fff;
+  border-bottom-right-radius: 4px;
+}
+.minis .row[selected] .num {
+  background: #d00;
+}
+
+body[mode="0"] .thumb,
+body[mode="0"] .img.selected {
+  filter: none !important;
+}
+body[mode="1"] .thumb {
+  filter: url(#alpha) !important;
+}
+body[mode="1"] .img.selected {
+  filter: url(#white) !important;
+}
+body[background="0"] .view { background: #000; }
+body[background="1"] .view { background: #888; }
+body[background="2"] .view { background: #fff; }
+
+body[under="0"] .img.under { visibility: hidden; }
+
+body[over="0"] .img.over { visibility: hidden; }
+body[over="2"] .img.over { filter: url(#black) !important; }
+body[over="3"] .img.over { filter: url(#white) !important; }
+</style>
+<script>
+
+function error(text) {
+  const e = document.getElementById('error');
+  e.textContent = text;
+  e.style.display = 'block';
+}
+function px(a) {
+  return a.toFixed(2) + 'px';
+}
+
+function nopx(a) {
+  return a.toFixed(2);
+}
+
+function create(what, classname) {
+  const e = document.createElement(what);
+  if (classname) {
+    e.className = classname;
+  }
+  return e;
+}
+
+function lerp(a, b, p) {
+  if (a.constructor == Array) {
+    const c = [];
+    for (let i = 0; i < a.length; i++) {
+      c.push(lerp(a[i], b[i], p));
+    }
+    return c;
+  } else {
+    return b*p + a*(1-p);
+  }
+}
+
+function setDims(element, width, height) {
+  element.style.width = px(width);
+  element.style.height = px(height);
+}
+
+// Heatmaps for depth visualisation.
+
+function colorLerp(a, b, p) {
+  var q = 1-p;
+  return [q*a[0] + p*b[0], q*a[1] + p*b[1], q*a[2] + p*b[2], q*a[3] + p*b[3]];
+}
+
+function colorHeat(f, min, max, colors) {
+  var c;
+  f = (f - min) / (max - min);
+  f = f * (colors.length - 1);
+  var idx = Math.floor(f);
+  if (idx > colors.length - 2) {
+    c = colors[colors.length-1];
+  } else if (idx < 0) {
+    c = colors[0];
+  } else {
+    var frac = f - idx;
+    c = colorLerp(colors[idx], colors[idx + 1], frac);
+  }
+  return c;
+}
+
+const mpiSources = MPI_SOURCES_DATA;
+
+const rainbow = [
+  [0.18995, 0.07176, 0.23217], [0.22500, 0.16354, 0.45096],
+  [0.25107, 0.25237, 0.63374], [0.26816, 0.33825, 0.78050],
+  [0.27628, 0.42118, 0.89123], [0.27543, 0.50115, 0.96594],
+  [0.25862, 0.57958, 0.99876], [0.21382, 0.65886, 0.97959],
+  [0.15844, 0.73551, 0.92305], [0.11167, 0.80569, 0.84525],
+  [0.09267, 0.86554, 0.76230], [0.12014, 0.91193, 0.68660],
+  [0.19659, 0.94901, 0.59466], [0.30513, 0.97697, 0.48987],
+  [0.42778, 0.99419, 0.38575], [0.54658, 0.99907, 0.29581],
+  [0.64362, 0.98999, 0.23356], [0.72596, 0.96470, 0.20640],
+  [0.80473, 0.92452, 0.20459], [0.87530, 0.87267, 0.21555],
+  [0.93301, 0.81236, 0.22667], [0.97323, 0.74682, 0.22536],
+  [0.99314, 0.67408, 0.20348], [0.99593, 0.58703, 0.16899],
+  [0.98360, 0.49291, 0.12849], [0.95801, 0.39958, 0.08831],
+  [0.92105, 0.31489, 0.05475], [0.87422, 0.24526, 0.03297],
+  [0.81608, 0.18462, 0.01809], [0.74617, 0.13098, 0.00851],
+  [0.66449, 0.08436, 0.00424], [0.47960, 0.01583, 0.01055]];
+const magma = [
+  [0.001462, 0.000466, 0.013866], [0.013708, 0.011771, 0.068667],
+  [0.039608, 0.031090, 0.133515], [0.074257, 0.052017, 0.202660],
+  [0.113094, 0.065492, 0.276784], [0.159018, 0.068354, 0.352688],
+  [0.211718, 0.061992, 0.418647], [0.265447, 0.060237, 0.461840],
+  [0.316654, 0.071690, 0.485380], [0.366012, 0.090314, 0.497960],
+  [0.414709, 0.110431, 0.504662], [0.463508, 0.129893, 0.507652],
+  [0.512831, 0.148179, 0.507648], [0.562866, 0.165368, 0.504692],
+  [0.613617, 0.181811, 0.498536], [0.664915, 0.198075, 0.488836],
+  [0.716387, 0.214982, 0.475290], [0.767398, 0.233705, 0.457755], 
+  [0.816914, 0.255895, 0.436461], [0.863320, 0.283729, 0.412403],
+  [0.904281, 0.319610, 0.388137], [0.937221, 0.364929, 0.368567],
+  [0.960949, 0.418323, 0.359630], [0.976690, 0.476226, 0.364466],
+  [0.986700, 0.535582, 0.382210], [0.992785, 0.594891, 0.410283],
+  [0.996096, 0.653659, 0.446213], [0.997325, 0.711848, 0.488154],
+  [0.996898, 0.769591, 0.534892], [0.995131, 0.827052, 0.585701],
+  [0.992440, 0.884330, 0.640099], [0.987053, 0.991438, 0.749504]];
+
+function buildHeatFilters(num_layers, min=0, max=1) {
+  const filters = document.querySelector('.filters');
+  const text = [];
+  for (let i = 0; i < num_layers; i++) {
+    const c = colorHeat(i / (num_layers-1), min, max, rainbow);
+    const d = colorHeat(i / (num_layers-1), min, max, magma);
+    const filter1 = `<filter id=depthcol1_${i}><feColorMatrix type=matrix values="0 0 0 0 ${nopx(c[0])} 0 0 0 0 ${nopx(c[1])} 0 0 0 0 ${nopx(c[2])} 0 0 0 1 0"></feColorMatrix></filter>`;
+    const filter2 = `<filter id=depthcol2_${i}><feColorMatrix type=matrix values="0 0 0 0 ${nopx(d[0])} 0 0 0 0 ${nopx(d[1])} 0 0 0 0 ${nopx(d[2])} 0 0 0 1 0"></feColorMatrix></filter>`;
+    text.push(filter1);
+    text.push(filter2);
+  }
+  filters.innerHTML = text.join('');
+}
+
+function buildMPI(layers, width, height) {
+  const mpi = create('div', 'mpi');
+  setDims(mpi, width, height);
+  for (let i = 0; i < layers.length; i++) {
+    const layer = create('div');
+    const src = layers[i].src;
+    const depth = layers[i].depth;
+    const img = create('div', 'img');
+    img.style.backgroundImage = `url(${src})`;
+    layer.style.transform = `scale(${nopx(depth)}) translateZ(-${px(depth)})`;
+    layer.appendChild(img);
+    mpi.appendChild(layer);
+  }
+  return mpi;
+}
+
+function digits(i, min) {
+  const s = '' + i;
+  if (s.length >= min) {
+    return s; 
+  } else {
+    return ('00000' + s).substr(-min);
+  }
+}
+
+function setInfo(num_layers, width, height, url) {
+  const info = document.getElementById('info');
+  document.querySelector('#info #num').textContent = num_layers;
+  document.querySelector('#info #width').textContent = width;
+  document.querySelector('#info #height').textContent = height;
+  document.querySelector('#info #url').textContent = url;
+}
+
+function loadScene(imgSources, width, height, near, far, fov) {
+  num_layers = imgSources.length;
+  const focal_length_px = 0.5 * width/Math.tan(fov/2 * Math.PI/180);
+  // Near and far are in metres. ppm = pixels per metre.
+  const ppm = 3600;
+  const layers = [];
+  const depths = [];
+  ratio = near/far;
+
+  setInfo(num_layers, width, height, "mpi$$.png");
+  for (let i = 0; i < num_layers; i++) {
+    layers.push({
+      src: imgSources[i],
+      depth: 1/lerp(ratio, 1, i/(num_layers - 1))});
+  }
+  buildHeatFilters(layers.length);
+  const mpi = buildMPI(layers, width, height);
+  mpi.postTransform = `translateZ(${px(focal_length_px)})`;
+  mpi.preTransform = `scale3D(${ppm/focal_length_px}, ${ppm/focal_length_px}, ${ppm})`;
+  const view = create('div', 'view');
+  setDims(view, width, height);
+  view.innerHTML = '';
+  view.appendChild(mpi);
+  view.style.perspective = px(focal_length_px);
+  pose.offset = 1.5*ppm;
+  const viewSpace = document.querySelector('.viewspace');
+  const half = create('div', 'half');
+  const half2 = create('div');
+  const whole = create('div', 'whole');
+  setDims(half, 0, height/2);
+  setDims(half2, 0, height/2);
+  setDims(whole, 0, height);
+  viewSpace.innerHTML = '';
+  viewSpace.appendChild(view);
+  viewSpace.appendChild(half);
+  viewSpace.appendChild(half2);
+  viewSpace.appendChild(whole);
+  setPose();
+  // Individual layers
+  buildMinis(layers, width, height);
+}
+
+// Changing the viewpoint
+
+const pose = {
+  rx: 0,
+  ry: 0,
+  tx: 0,
+  ty: 0,
+  tz: 0,
+  offset: 0
+}
+
+let moveScale = 4.5;
+
+function setPose() {
+  const mpi = document.querySelector('.mpi');
+  const transform = `translateZ(${px(-pose.offset)}) translate3D(${px(pose.tx * moveScale)}, ${px(pose.ty * moveScale)}, ${px(pose.tz * moveScale)}) rotateX(${pose.rx * moveScale}deg) rotateY(${pose.ry * moveScale}deg) translateZ(${px(pose.offset)})`;
+  mpi.style.transform = mpi.postTransform + ' ' + transform + ' ' + mpi.preTransform;
+}
+
+function resetPose() {
+  pose.rx = 0;
+  pose.ry = 0;
+  pose.tx = 0;
+  pose.ty = 0;
+  pose.tz = 0;
+  setPose();
+}
+
+// UI controls.
+
+const rotSpeed = 0.003;
+const transSpeed = .3;
+const wheelSpeed = .5;
+const hoverAngle = 2;
+
+let moveMode = 0;
+let moveStartTime = 0;
+
+function dragStart(dragState) {
+  if (moveMode != 1) {
+    return false;
+  }
+  return true;
+}
+
+function dragDuring(dragState, x, y) {
+  if (dragState.shiftKey) {
+    pose.tx += transSpeed * (x - dragState.x);
+    pose.ty += transSpeed * (y - dragState.y);
+  } else {
+    pose.ry += rotSpeed * (x - dragState.x);
+    pose.rx -= rotSpeed * (y - dragState.y);
+  }
+  dragState.x = x;
+  dragState.y = y;
+  setPose();
+}
+
+function dragEnd(dragState) {}
+
+function addHandlers() {
+  const view = document.querySelector('.view');
+  view.addEventListener('wheel', function(e) {
+    pose.tz += wheelSpeed * e.deltaY;
+    setPose();
+    e.preventDefault();
+  });
+  // Drag support, allows draging outside view.
+  let dragging = false;
+  let dragState = {};
+
+  view.addEventListener('mousedown', function(e) {
+    dragState.x = e.clientX;
+    dragState.y = e.clientY;
+    dragState.shiftKey = e.shiftKey;
+    e.preventDefault();
+    dragging = dragStart(dragState);
+  });
+  view.addEventListener('dblclick', function(e) {
+    resetPose();
+    e.preventDefault();
+  });
+  view.addEventListener('mousemove', function(e) {
+    if (moveMode != 0) {
+      return;
+    }
+    const x = 2 * e.offsetX / view.clientWidth - 1;
+    const y = 2 * e.offsetY / view.clientHeight - 1;
+    pose.rx = -hoverAngle * y;
+    pose.ry = hoverAngle * x;
+    setPose();
+  });
+  view.addEventListener('mouseleave', function(e) {
+    if (moveMode != 0) {
+      return;
+    }
+    resetPose();
+  });
+  document.body.addEventListener('mousemove', function(e) {
+    if (!dragging) {
+      return;
+    } else {
+      dragDuring(dragState, e.clientX, e.clientY);
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+  document.body.addEventListener('mouseup', function(e) {
+    if (!dragging) {
+      return;
+    } else {
+      dragging = false;
+      dragEnd(dragState);
+      e.preventDefault();
+    }
+  }, true);
+  // So that if you happen to drag over thumbnails, they don't trigger.
+  document.body.addEventListener('mouseenter', function(e) {
+    if (!dragging) {
+      return;
+    } else {
+      e.preventDefault();
+      e.stopPropagation();
+    }
+  }, true);
+  document.body.addEventListener('mouseleave', function(e) {
+    if (!dragging || e.fromElement != document.body) {
+      return;
+    } else {
+      dragging = false;
+      dragEnd(dragState);
+      e.preventDefault();
+    }
+  }, true);
+}
+
+
+function updateButtons(id, mode) {
+  const buttons = document.querySelectorAll(`#${id} a`);
+  for (let i = 0; i < buttons.length; i++) {
+    buttons[i].className = i == mode ? "on" : "off";
+  }
+}
+
+function setMoveMode(mode) {
+  moveMode = mode;
+  moveStartTime = 0;
+  updateButtons('movemode', mode);
+  resetPose();
+  const view = document.querySelector('.view');
+  view.setAttribute('nav', mode);
+}
+
+function setViewSize(s) {
+  updateButtons('viewsize', s);
+  viewSpace = document.querySelector('.viewspace');
+  viewSpace.setAttribute('size', s);
+}
+
+
+// Depth control
+
+function showDepth(mode) {
+  let layers = document.querySelectorAll('.mpi .img');
+  for (let i = 0; i < layers.length; i++) {
+    if (mode > 0) {
+      layers[i].style.filter = `url(#depthcol${mode}_${i})`;
+    } else {
+      layers[i].style.filter = '';
+    }
+  }
+  updateButtons('viewmode', mode);
+}
+
+// Show only one layer
+
+function showOne(index) {
+  let layers = document.querySelectorAll('.mpi .img');
+  let i = 0;
+  for (; i < Math.min(index, layers.length); i++) {
+    layers[i].className = 'img under';
+  }
+  for (; i < Math.min(index + 1, layers.length); i++) {
+    layers[i].className = 'img selected';
+  }
+  for (; i < layers.length; i++) {
+    layers[i].className = 'img over';
+  }
+}
+function showAll() {
+  let layers = document.querySelectorAll('.mpi .img');
+  for (let i = 0; i < layers.length; i++) {
+    layers[i].className = 'img';
+  }  
+}
+
+function clickRow(index) {
+  const rows = document.querySelectorAll('.minis .row');
+  const minis = document.querySelector('.minis');
+
+  if (rows[index].hasAttribute('selected')) {
+    // Clear it.
+    rows[index].removeAttribute('selected');
+    minis.setAttribute('selected', '0');
+    showAll();
+  } else {
+    for (let i = 0; i < rows.length; i++) {
+      rows[i].removeAttribute('selected');
+    }
+    rows[index].setAttribute('selected', '1');
+    minis.setAttribute('selected', '1');
+    showOne(index);
+  }
+}
+
+function enterRow(index) {
+  if (document.querySelector('.minis[selected="0"]')) {
+    showOne(index);
+  }
+}
+
+function leaveRow(index) {
+  if (document.querySelector('.minis[selected="0"]')) {
+    showAll(index);
+  }  
+}
+// Layer thumbnails ("minis") on the right-hand side.
+
+function buildMinis(layers, width, height) {
+  const minis = document.querySelector('.minis');
+  // Scale down
+  const scale = 100 / Math.max(width, height);
+  width = Math.floor(width * scale);
+  height = Math.round(height * scale);
+  // Always an even number of layers per row.
+  const groupsize = 2;
+  for (let i = 0; i < layers.length; i += groupsize) {
+    const group = create('div', 'group');
+    for (let j = i; j < layers.length && j < i + groupsize; j++) {
+      const row = create('div', 'row');
+      const thumb = create('div', 'thumb');
+      thumb.style.backgroundImage = `url(${layers[j].src})`;
+      setDims(thumb, width, height);
+      const num = create('div', 'num');
+      num.textContent = j;
+      row.appendChild(thumb);
+      row.appendChild(num);
+      row.addEventListener('click', () => { clickRow(j); });
+      row.addEventListener('mouseenter', () => { enterRow(j); });
+      row.addEventListener('mouseleave', () => { leaveRow(); });
+      group.appendChild(row);
+    }
+    minis.appendChild(group);
+  }
+}
+
+function miniMode(mode) {
+  updateButtons('minimodes', mode);
+  document.body.setAttribute('mode', mode);
+}
+
+function backgroundMode(mode) {
+  updateButtons('backgroundmodes', mode);
+  document.body.setAttribute('background', mode);
+}
+
+function behindMode(mode) {
+  updateButtons('behindmodes', mode);
+  document.body.setAttribute('under', mode);
+}
+
+function frontMode(mode) {
+  updateButtons('frontmodes', mode);
+  document.body.setAttribute('over', mode);
+}
+
+function tick(time) {
+  window.requestAnimationFrame(tick);
+  if (moveMode < 2) {
+    return;
+  }
+  if (!moveStartTime) {
+    moveStartTime = time;
+  }
+  time -= moveStartTime;
+  if (moveMode == 2) {
+    pose.tx = 100 * Math.sin(Math.PI * time/3000);
+    setPose(); 
+  } else {
+    pose.ry = 2*Math.sin(Math.PI * time/4300);
+    pose.rx = Math.cos(Math.PI * time/5000);
+    pose.tz = 200 * Math.sin(Math.PI * time/8012);
+    setPose();
+  }
+  
+}
+
+async function initFromParameters() {
+  const params = new URL(window.location).searchParams;
+  const layerzero = params.get('url') || "mpi$$.png";
+  const num_layers = parseInt(params.get('n'), 10) || mpiSources.length;
+  const size = params.get('s') || null;
+  
+  if (!layerzero) {
+    error('To view an MPI, specify the following parameters in the URL:\n' +
+          'url: The url of layer zero RGBA image. E.g. http://foo/bar/0.png.\n' +
+          '     You can also use "$" instead of "0" to avoid ambiguity.\n' +
+          'n: The number of MPI layers.\n' +
+          's: The dimensions: width and height, comma-separated. E.g. 640,360.\n\n' +
+          'Example:\n' +
+          '  ?n=32&s=640,360&url=http://my/layers/layer_$$.png.')
+    return;
+  }
+  if (!num_layers) {
+    error('URL parameter "n" (number of layers) is missing or invalid.');
+    return;
+  }
+  let width, height;
+
+  if (size) {
+    const match = size.match(/([\d]+),([\d]+)/);
+    width = parseInt(match[1], 10);
+    height = parseInt(match[2], 10);
+    if (!width || !height) {
+      error('URL parameter "s" (dimensions, e.g. "640,360") is invalid.');
+      return;    
+    }
+  } else {
+    const i = new Image();
+    await new Promise((resolve, _) => {
+      i.onload = () => {
+        width = i.width * 2;
+        height = i.height * 2;
+        resolve();
+      };
+      i.src = mpiSources[0];
+    })
+  
+  }
+  
+  // Optional parameters that don't make much difference.
+  near = parseFloat(params.get('near') || 1.0);
+  far = parseFloat(params.get('far') || 100.0);
+  fov = parseFloat(params.get('fov')|| 60);
+  
+  loadScene(mpiSources, width, height, near, far, fov);
+
+  // Optional parameters to control other things.
+  moveScale = parseFloat(params.get('mv') || 1.5);
+  setMoveMode(params.get('move') || 1);
+  showDepth(params.get('depth') || 0);
+  setViewSize(params.get('scale') || 1);
+  miniMode(params.get('mini') || 0);
+}
+
+
+</script>
+
+</head><body mode="0" under="0" over="0" background="DeepView%20MPI%20viewer_files/1.html">
+<div id="error"></div>
+<svg class="svgdefs" xmlns="http://www.w3.org/2000/svg">
+<defs>
+<filter id="alpha"><feColorMatrix type="matrix" values="0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 0 0 1"></feColorMatrix></filter>
+<filter id="white"><feColorMatrix type="matrix" values="0 0 0 0 1 0 0 0 0 1 0 0 0 0 1 0 0 0 1 0"></feColorMatrix></filter>
+<filter id="black"><feColorMatrix type="matrix" values="0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 0 1 0"></feColorMatrix></filter>
+</defs>
+<defs class="filters"><filter id="depthcol1_0"><feColorMatrix type="matrix" values="0 0 0 0 0.19 0 0 0 0 0.07 0 0 0 0 0.23 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_0"><feColorMatrix type="matrix" values="0 0 0 0 0.00 0 0 0 0 0.00 0 0 0 0 0.01 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_1"><feColorMatrix type="matrix" values="0 0 0 0 0.27 0 0 0 0 0.38 0 0 0 0 0.83 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_1"><feColorMatrix type="matrix" values="0 0 0 0 0.09 0 0 0 0 0.06 0 0 0 0 0.24 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_2"><feColorMatrix type="matrix" values="0 0 0 0 0.22 0 0 0 0 0.65 0 0 0 0 0.98 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_2"><feColorMatrix type="matrix" values="0 0 0 0 0.26 0 0 0 0 0.06 0 0 0 0 0.46 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_3"><feColorMatrix type="matrix" values="0 0 0 0 0.10 0 0 0 0 0.88 0 0 0 0 0.74 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_3"><feColorMatrix type="matrix" values="0 0 0 0 0.43 0 0 0 0 0.12 0 0 0 0 0.51 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_4"><feColorMatrix type="matrix" values="0 0 0 0 0.40 0 0 0 0 0.99 0 0 0 0 0.41 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_4"><feColorMatrix type="matrix" values="0 0 0 0 0.60 0 0 0 0 0.18 0 0 0 0 0.50 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_5"><feColorMatrix type="matrix" values="0 0 0 0 0.74 0 0 0 0 0.96 0 0 0 0 0.21 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_5"><feColorMatrix type="matrix" values="0 0 0 0 0.78 0 0 0 0 0.24 0 0 0 0 0.45 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_6"><feColorMatrix type="matrix" values="0 0 0 0 0.96 0 0 0 0 0.77 0 0 0 0 0.23 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_6"><feColorMatrix type="matrix" values="0 0 0 0 0.93 0 0 0 0 0.35 0 0 0 0 0.38 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_7"><feColorMatrix type="matrix" values="0 0 0 0 0.98 0 0 0 0 0.48 0 0 0 0 0.12 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_7"><feColorMatrix type="matrix" values="0 0 0 0 0.99 0 0 0 0 0.54 0 0 0 0 0.39 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_8"><feColorMatrix type="matrix" values="0 0 0 0 0.84 0 0 0 0 0.21 0 0 0 0 0.02 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_8"><feColorMatrix type="matrix" values="0 0 0 0 1.00 0 0 0 0 0.74 0 0 0 0 0.51 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol1_9"><feColorMatrix type="matrix" values="0 0 0 0 0.48 0 0 0 0 0.02 0 0 0 0 0.01 0 0 0 1 0"></feColorMatrix></filter><filter id="depthcol2_9"><feColorMatrix type="matrix" values="0 0 0 0 0.99 0 0 0 0 0.99 0 0 0 0 0.75 0 0 0 1 0"></feColorMatrix></filter></defs></svg>
+<h1>DeepView MPI viewer</h1>
+<div id="info">
+<span id="num">10</span> layers,
+<span id="width">224</span> × <span id="height">224</span><br><span id="url">lores/scene_009/rgba_$$.png</span>
+</div>
+<div class="viewspace" size="2"><div class="view" style="width: 224px; height: 224px; perspective: 193.99px;" nav="1"><div class="mpi" style="width: 224px; height: 224px; transform: translateZ(193.99px) translateZ(-5400px) translate3d(0px, 0px, 0px) rotateX(0.819deg) rotateY(1.5075deg) translateZ(5400px) scale3d(18.5577, 18.5577, 3600);"><div style="transform: scale(100) translateZ(-100px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_00.png&quot;);"></div></div><div style="transform: scale(8.33) translateZ(-8.33px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_01.png&quot;);"></div></div><div style="transform: scale(4.35) translateZ(-4.35px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_02.png&quot;);"></div></div><div style="transform: scale(2.94) translateZ(-2.94px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_03.png&quot;);"></div></div><div style="transform: scale(2.22) translateZ(-2.22px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_04.png&quot;);"></div></div><div style="transform: scale(1.79) translateZ(-1.79px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_05.png&quot;);"></div></div><div style="transform: scale(1.49) translateZ(-1.49px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_06.png&quot;);"></div></div><div style="transform: scale(1.28) translateZ(-1.28px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_07.png&quot;);"></div></div><div style="transform: scale(1.12) translateZ(-1.12px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_08.png&quot;);"></div></div><div style="transform: scale(1) translateZ(-1px);"><div class="img" style="background-image: url(&quot;lores/scene_009/rgba_09.png&quot;);"></div></div></div></div><div class="half" style="width: 0px; height: 112px;"></div><div style="width: 0px; height: 112px;"></div><div class="whole" style="width: 0px; height: 224px;"></div></div>
+
+<!-- View controls --->
+<br>
+<div class="controls">
+Movement mode<span class="ts"></span>: <span id="movemode">
+<a onclick="setMoveMode(0)" class="off">hover</a>
+<a onclick="setMoveMode(1)" class="on">drag</a>
+<a onclick="setMoveMode(2)" class="off">sway</a>
+<a onclick="setMoveMode(3)" class="off">wander</a>
+</span>
+<br>
+View mode<span class="ts"></span>: <span id="viewmode">
+<a onclick="showDepth(0)" class="on">normal</a>
+<a onclick="showDepth(1)" class="off">depth 1</a>
+<a onclick="showDepth(2)" class="off">depth 2</a>
+</span>
+<br>
+Size<span class="ts"></span>: <span id="viewsize">
+<a onclick="setViewSize(0)" class="off">50<span class="ts"></span>% (retina display)</a>
+<a onclick="setViewSize(1)" class="off">100<span class="ts"></span>%</a>
+<a onclick="setViewSize(2)" class="on">200<span class="ts"></span>%</a>
+</span>
+</div>
+
+<!-- Individual layers -->
+<div class="minis" selected="0"><h2>Layers</h2>
+<div id="minimodes">Show<span class="ts"></span>:
+<a onclick="miniMode(0)" class="on">Full</a>
+<a onclick="miniMode(1)" class="off">Alpha</a></div>
+
+<div id="backgroundmodes">Background<span class="ts"></span>:
+<a onclick="backgroundMode(0)">Black</a>
+<a onclick="backgroundMode(1)" class="on">Grey</a>
+<a onclick="backgroundMode(2)">White</a></div>
+
+<div id="behindmodes">Layers behind<span class="ts"></span>:
+<a onclick="behindMode(0)" class="on">Hide</a>
+<a onclick="behindMode(1)">Show</a></div>
+
+<div id="frontmodes">Layers in front<span class="ts"></span>:
+<a onclick="frontMode(0)" class="on">Hide</a>
+<a onclick="frontMode(1)">Show</a>
+<a onclick="frontMode(2)">Black</a>
+<a onclick="frontMode(3)">White</a></div>
+<br><br>
+
+<script>
+initFromParameters().then(() => {
+  addHandlers();
+  tick();
+});
+</script>
+
+
+</body></html>
