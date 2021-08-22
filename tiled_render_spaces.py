@@ -231,13 +231,11 @@ def crop_model_input(inp, x0, y0, tile_w, tile_h):
     return utils_dset.wrap_input(res)
 
 
-def create_html_viewer(model, device, x, num_planes):
+def create_html_viewer(model, device, x, num_planes, tile_w, tile_h):
     """Infer a batch, and create an HTML viewer from the template"""
     
     # breakpoint()
     _, _, base_h, base_w, _ = x['in_img'].shape
-    tile_h = 120
-    tile_w = 200
     margin_w = tile_w // 5
     margin_h = tile_h // 5
     subtile_w = tile_w - 2 * margin_w
@@ -307,6 +305,9 @@ def main():
     dset_path_spaces = os.environ.get('SPACES_PATH', '/big/workspace/spaces_dataset/')
     dset_path_re = os.environ.get('RE_PATH', '/big/workspace/real-estate-10k-run0')
     dset_path_blender = os.environ.get('BLENDER_PATH', '/big/workspace/negatives-wupi/felix-london-july-74/blender0/')
+    tile_w = int(os.environ.get('TILE_W', '200'))
+    tile_h = int(os.environ.get('TILE_H', '120'))
+    scene_idx = int(os.environ.get('SCENE_INDEX', '1'))
 
     num_planes = 10
     if dset_name.startswith('spaces'):
@@ -317,13 +318,15 @@ def main():
         dset = dset_realestate.dset1.DsetRealEstate1(dset_path_re, False, im_w=im_w, im_h=im_h,
                                                                     num_planes=num_planes, num_views=3, max_w=im_w, no_crop = True)
     elif dset_name =="blender":
-        im_w, im_h = 130, 120
+        im_w, im_h = tile_w, tile_h # recommendation? use 130, 120
         dset = dset_blender.dset1.DsetBlender(dset_path_blender, False, im_w=im_w, im_h=im_h, max_w = 800, no_crop = True)
     else:
         raise 'Not Implemented'
 
     dloader = torch.utils.data.DataLoader(dset, batch_size=1)
-    x = next(iter(dloader))
+    iterator = iter(dloader)
+    for i in range(scene_idx):
+      x = next(iterator)
 
     # load model
     model = model_deepview.DeepViewLargeModel().to(device=device)
@@ -332,7 +335,7 @@ def main():
     if filepath.exists():
         model.load_state_dict(torch.load(str(filepath)))
 
-    create_html_viewer(model, device, x, num_planes)
+    create_html_viewer(model, device, x, num_planes, tile_w, tile_h)
 
 
 ########################################################################################################################

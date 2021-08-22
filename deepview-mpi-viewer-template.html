@@ -672,8 +672,8 @@ async function initFromParameters() {
     const i = new Image();
     await new Promise((resolve, _) => {
       i.onload = () => {
-        width = i.width * 2;
-        height = i.height * 2;
+        width = i.width;
+        height = i.height;
         resolve();
       };
       i.src = mpiSources[0];
