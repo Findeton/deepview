@@ -57,11 +57,10 @@ class DsetSpaces1(base.AbstractDsetSpaces):
         if not self.is_val and self.layout == 'random_4_9':
             self.idxs_in = random.choices([i for i in range(0, 16)], k=len(self.idxs_in)) 
             free_idx = [i for i in range(0, 16) if i not in self.idxs_in]
-            tgt_i, ref_i = random.choices(free_idx, k=2)
+            tgt_i = random.choice(free_idx)
             self.idxs_tg = [tgt_i]
-            self.ref_idx = ref_i
-        else:
-            self.ref_idx = 5 if self.is_val else 10
+        
+        self.ref_idx = self.idxs_tg[0]
         idxs_in_full = [(idx_scene, idx_rig, i) for i in self.idxs_in]
         idxs_tgt_full = [(idx_scene, idx_rig, i) for i in self.idxs_tgt]
         res = self._get_elem(idxs_in_full, idxs_tgt_full)
