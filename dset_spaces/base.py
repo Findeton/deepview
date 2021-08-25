@@ -47,9 +47,9 @@ class AbstractDsetSpaces(torch.utils.data.Dataset):
         # Create the rig total index table, which might be useful
         # i = scene index, j = rig pos in scene
         self.rig_table = []
-        n = len(scenes)
+        n = len(self.scenes)
         for i in range(n):
-            for j in range(len(scenes[i])):
+            for j in range(len(self.scenes[i])):
                 self.rig_table.append((i, j))
         # Create PSV planes
         self.psv_planes = torch.tensor(utils_dset.inv_depths(1, 100, self.n_planes))

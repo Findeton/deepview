@@ -17,13 +17,14 @@ import utils_dset
 STANDARD_LAYOUTS = {
     'large_4_1': ([0, 3, 9, 12], [6]),
     'large_4_9': ([0, 3, 9, 12], [1, 2, 4, 5, 6, 7, 8, 10, 11]),
+    'random_4_9': ([0, 3, 9, 12], [6]),
     'dummy_5_2': ([0, 1, 2, 3, 4], [5, 6]),  # This is just to test size=5 input, don't use this for real
 }
 
 
 #######################################################################################################################
 class DsetSpaces1(base.AbstractDsetSpaces):
-    def __init__(self, dataset_path, is_val=True, layout='large_4_1', n_planes=10, tiny=False, im_w=200, im_h=120, no_crop=False):
+    def __init__(self, dataset_path, is_val=True, layout='random_4_9', n_planes=10, tiny=False, im_w=200, im_h=120, no_crop=False):
         """
         The "standard" fully deterministic (no randomness) Spaces dataset
         Treat each rig position of each scene as an element, with non-random input and target views
@@ -36,6 +37,7 @@ class DsetSpaces1(base.AbstractDsetSpaces):
         """
         super().__init__(dataset_path, is_val, n_planes, tiny, im_w, im_h)
         self.no_crop = no_crop
+        self.layout = layout
         if isinstance(layout, str):
             tup = STANDARD_LAYOUTS[layout]
         elif isinstance(layout, tuple):
@@ -52,11 +54,19 @@ class DsetSpaces1(base.AbstractDsetSpaces):
     def __getitem__(self, item):
         # Add scene and rig to camera indices
         idx_scene, idx_rig = self.rig_table[item]
+        if not self.is_val and self.layout == 'random_4_9':
+            self.idxs_in = random.choices([i for i in range(0, 16)], k=len(self.idxs_in)) 
+            free_idx = [i for i in range(0, 16) if i not in self.idxs_in]
+            tgt_i, ref_i = random.choices(free_idx, k=2)
+            self.idxs_tg = [tgt_i]
+            self.ref_idx = ref_i
+        else:
+            self.ref_idx = 5 if self.is_val else 10
         idxs_in_full = [(idx_scene, idx_rig, i) for i in self.idxs_in]
         idxs_tgt_full = [(idx_scene, idx_rig, i) for i in self.idxs_tgt]
         res = self._get_elem(idxs_in_full, idxs_tgt_full)
         # Add ref image data
-        self._add_ref((idx_scene, idx_rig, 6), res)
+        self._add_ref((idx_scene, idx_rig, self.ref_idx), res)
 
         res['in_intrin_base'] = res['in_intrin']
         res['ref_intrin_base'] = res['ref_intrin']
