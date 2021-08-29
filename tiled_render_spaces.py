@@ -376,7 +376,7 @@ def main():
         dloader = torch.utils.data.DataLoader(dset, batch_size=1)
         iterator = iter(dloader)
         for i in range(scene_idx):
-        x = next(iterator)
+            x = next(iterator)
 
     # load model
     model = model_deepview.DeepViewLargeModel().to(device=device)
