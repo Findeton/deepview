@@ -297,6 +297,52 @@ def create_html_viewer(model, device, x, num_planes, tile_w, tile_h):
 
 ##### LLFF
 
+def create_colmap_input(dset_path, device, num_planes):
+    # Converts my pose format into 4x4 extrinsic and 3x3 intrinsic matrices
+    #   My rotations are in [down, right, backwards] orientation, 
+    #   hence the 'fix_yx' thing to convert from that format [-y x z] to the more conventional [x y z]
+    fix_yx = True
+    in_cfw, imgs, hwf, _names = load_colmap_data(dset_path, max_width=800)
+    #in_cfw = torch.from_numpy(in_cfw).float()
+
+    # fix the -y x thing
+    if fix_yx:
+        x = np.concatenate([in_cfw[..., :3, 1:2], in_cfw[..., :3, 0:1], in_cfw[..., :3, 2:]], -1)
+        in_cfw = np.concatenate([x, in_cfw[..., 3:, :]], -2)
+
+    in_cfw = torch.from_numpy(in_cfw).float().to(device)
+    in_wfc = torch.inverse(in_cfw)
+    num_cams, _, _ = in_wfc.shape
+
+    #plot_cameras(in_wfc.cpu().numpy(), names)
+    #breakpoint()
+
+    # in_cfw: [16, 4, 4]
+    # imgs: [2160, 3840, 3, 16]
+    # hwf: [3, 1]
+    h,w, f = hwf[:, 0]
+    ref_intrin = utils_dset.make_intrinsics_matrix(f, f, w*1.0, h*1.0).to(device) # [3,3]
+    in_intrin = ref_intrin.unsqueeze(0).expand(num_cams, -1, -1) # [16, 3, 3]
+    imgs = torch.from_numpy(imgs).float().to(device).permute(3,0,1,2) # [16, 112, 200, 3]
+
+    mpi_planes = torch.tensor(utils_dset.inv_depths(1, 100, num_planes)).float().to(device)
+
+    # recreate the model input, use only up to 9 input images
+    num_images = imgs.shape[0]
+    x = {
+        'in_img': imgs[:num_images].unsqueeze(0), # [1, 9, 132, 200, 3]
+        'in_intrin': in_intrin[:num_images].unsqueeze(0), # [1, 9, 3, 3]
+        'in_cfw': in_cfw[:num_images].unsqueeze(0), # [1, 9, 4, 4]
+        'mpi_planes': mpi_planes.unsqueeze(0), # [1, 10]
+        'ref_intrin': in_intrin[0].unsqueeze(0), # [1, 3, 3]
+        'ref_cfw': in_cfw[0].unsqueeze(0), # [1, 4, 4]
+        'ref_wfc': in_wfc[0].unsqueeze(0), # [1, 3, 3]
+        'tgt_intrin': in_intrin[0].unsqueeze(0).unsqueeze(0), # [1, 3, 3]
+        'tgt_cfw': in_cfw[0].unsqueeze(0).unsqueeze(0), # [1, 4, 4]
+        'tgt_img': imgs[0].unsqueeze(0).unsqueeze(0), # [1, 1, 132, 200, 3]
+    }
+    return x
+
 ########################################################################################################################
 def main():
     device_type = os.environ.get('DEVICE', 'cuda')
@@ -305,6 +351,7 @@ def main():
     dset_path_spaces = os.environ.get('SPACES_PATH', '/big/workspace/spaces_dataset/')
     dset_path_re = os.environ.get('RE_PATH', '/big/workspace/real-estate-10k-run0')
     dset_path_blender = os.environ.get('BLENDER_PATH', '/big/workspace/negatives-wupi/felix-london-july-74/blender0/')
+    dset_path_colmap = os.environ.get('COLMAP_PATH', '/big/workspace/datasets/spaces_2k_037')
     tile_w = int(os.environ.get('TILE_W', '200'))
     tile_h = int(os.environ.get('TILE_H', '120'))
     scene_idx = int(os.environ.get('SCENE_INDEX', '1'))
@@ -320,13 +367,16 @@ def main():
     elif dset_name =="blender":
         im_w, im_h = tile_w, tile_h # recommendation? use 130, 120
         dset = dset_blender.dset1.DsetBlender(dset_path_blender, False, im_w=im_w, im_h=im_h, max_w = 800, no_crop = True)
+    elif dset_name == "colmap":
+        x = create_colmap_input(dset_path_colmap, device, num_planes)
     else:
         raise 'Not Implemented'
 
-    dloader = torch.utils.data.DataLoader(dset, batch_size=1)
-    iterator = iter(dloader)
-    for i in range(scene_idx):
-      x = next(iterator)
+    if dset_name != "colmap":
+        dloader = torch.utils.data.DataLoader(dset, batch_size=1)
+        iterator = iter(dloader)
+        for i in range(scene_idx):
+        x = next(iterator)
 
     # load model
     model = model_deepview.DeepViewLargeModel().to(device=device)
