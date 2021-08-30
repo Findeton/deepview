@@ -10,7 +10,7 @@ An MPI generated with this code with a trained model, at the moment, looks like 
 
 # Train
 
-You can also run the following code in [this Colab notebook](https://colab.research.google.com/drive/1tr4N0shbCH2sLfgStZtZcVNPskY5mZOg?usp=sharing). I've also included [a copy of the notebook](colab_notebook.ipynb) in the repo and I've published [a blogpost](http://localhost:1313/blog/lightfields-deepview/) as well.
+You can also run the following code in [this Colab notebook](https://colab.research.google.com/drive/1tr4N0shbCH2sLfgStZtZcVNPskY5mZOg?usp=sharing). I've also included [a copy of the notebook](colab_notebook.ipynb) in the repo and I've published [a blogpost](https://roblesnotes.com/blog/lightfields-deepview/) as well.
 
 We'll use the [Spaces](https://github.com/augmentedperception/spaces_dataset) and the [Real Estate 10K](https://google.github.io/realestate10k/) datasets to train the model. I'll use the notebook format here so if the line starts with a ! bang it's bash and otherwise it's Python code.
 
