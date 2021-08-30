@@ -1,6 +1,6 @@
-# deepview
+# Deepview: View Synthesis with Learned Gradient Descent
 
-An implementation of Google's Deepview paper https://augmentedperception.github.io/deepview/
+An amateur implementation of Google's Deepview paper https://augmentedperception.github.io/deepview/
 
 # Train
 
