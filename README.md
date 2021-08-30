@@ -2,6 +2,12 @@
 
 An amateur implementation of Google's Deepview paper on View Synthesis with Multiplane Images (MPI) https://augmentedperception.github.io/deepview/
 
+# Results
+
+An MPI generated with this code with a trained model, at the moment, looks like this:
+
+![MPI](results.png)
+
 # Train
 
 We'll use the Spaces and the Real Estate 10K datasets to train the model. I'll use the notebook format so if the line starts with a ! bang it's bash and otherwise it's Python code.
