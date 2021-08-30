@@ -1,6 +1,6 @@
 # Deepview: View Synthesis with Learned Gradient Descent
 
-An amateur implementation of Google's Deepview paper https://augmentedperception.github.io/deepview/
+An amateur implementation of Google's Deepview paper on View Synthesis with Multiplane Images (MPI) https://augmentedperception.github.io/deepview/
 
 # Train
 
