@@ -359,7 +359,7 @@ def main():
     num_planes = 10
     if dset_name.startswith('spaces'):
         im_w, im_h = 800, 470
-        dset = dset_spaces.dset1.DsetSpaces1(dset_path_spaces, False, 'large_4_9', tiny=True, im_w=im_w, im_h=im_h, no_crop=True)
+        dset = dset_spaces.dset1.DsetSpaces1(dset_path_spaces, False, 'large_4_9', tiny=False, im_w=im_w, im_h=im_h, no_crop=True)
     elif dset_name == 're:1random':
         im_w, im_h = 854, 480
         dset = dset_realestate.dset1.DsetRealEstate1(dset_path_re, False, im_w=im_w, im_h=im_h,
