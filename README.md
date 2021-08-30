@@ -10,7 +10,9 @@ An MPI generated with this code with a trained model, at the moment, looks like 
 
 # Train
 
-We'll use the Spaces and the Real Estate 10K datasets to train the model. I'll use the notebook format so if the line starts with a ! bang it's bash and otherwise it's Python code.
+You can also run the following code in [this Colab notebook](https://colab.research.google.com/drive/1tr4N0shbCH2sLfgStZtZcVNPskY5mZOg?usp=sharing). I've also included [a copy of the notebook](colab_notebook.ipynb) in the repo and I've published [a blogpost](http://localhost:1313/blog/lightfields-deepview/) as well.
+
+We'll use the [Spaces](https://github.com/augmentedperception/spaces_dataset) and the [Real Estate 10K](https://google.github.io/realestate10k/) datasets to train the model. I'll use the notebook format here so if the line starts with a ! bang it's bash and otherwise it's Python code.
 
 Let's start with the spaces dataset:
 
@@ -40,6 +42,6 @@ Let's show an MPI from that dataset:
     import IPython
     IPython.display.HTML(filename='/content/deepview/generated-html/deepview-mpi-viewer.html')
 
-You can use the full Real Estate 10K dataset to train the model, but it's large so I've split it into 39 repos. The first one is the following one and you only have to replace the last number to get the rest:
+You can use the full Real Estate 10K dataset to train the model, but it's large and requires pre-processing so I've split it into 39 repos! The first one is the following and you only have to replace the last number to get the rest:
 
 https://gitlab.com/Findeton/real-estate-10g-1
