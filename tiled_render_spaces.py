@@ -296,6 +296,8 @@ def create_html_viewer(model, device, x, num_planes, tile_w, tile_h):
         output_file.write(template_str)
 
 ##### LLFF
+def stack_picker(inn, picks):
+  return torch.stack([inn[i] for i in picks], dim=0)
 
 def create_colmap_input(dset_path, device, num_planes):
     # Converts my pose format into 4x4 extrinsic and 3x3 intrinsic matrices
@@ -326,20 +328,23 @@ def create_colmap_input(dset_path, device, num_planes):
     imgs = torch.from_numpy(imgs).float().to(device).permute(3,0,1,2) # [16, 112, 200, 3]
 
     mpi_planes = torch.tensor(utils_dset.inv_depths(1, 100, num_planes)).float().to(device)
+    # choose 4 input images, like in the spaces dataset
+    picks = [0,3,9,12]
+    # reference image index is 6, like in the spaces dataset
+    ref_idx = tgx_idx = 6
 
     # recreate the model input, use only up to 9 input images
-    num_images = imgs.shape[0]
     x = {
-        'in_img': imgs[:num_images].unsqueeze(0), # [1, 9, 132, 200, 3]
-        'in_intrin': in_intrin[:num_images].unsqueeze(0), # [1, 9, 3, 3]
-        'in_cfw': in_cfw[:num_images].unsqueeze(0), # [1, 9, 4, 4]
+        'in_img': stack_picker(imgs, picks).unsqueeze(0), # [1, 9, 132, 200, 3]
+        'in_intrin': stack_picker(in_intrin, picks).unsqueeze(0), # [1, 9, 3, 3]
+        'in_cfw': stack_picker(in_cfw, picks).unsqueeze(0), # [1, 9, 4, 4]
         'mpi_planes': mpi_planes.unsqueeze(0), # [1, 10]
-        'ref_intrin': in_intrin[0].unsqueeze(0), # [1, 3, 3]
-        'ref_cfw': in_cfw[0].unsqueeze(0), # [1, 4, 4]
-        'ref_wfc': in_wfc[0].unsqueeze(0), # [1, 3, 3]
-        'tgt_intrin': in_intrin[0].unsqueeze(0).unsqueeze(0), # [1, 3, 3]
-        'tgt_cfw': in_cfw[0].unsqueeze(0).unsqueeze(0), # [1, 4, 4]
-        'tgt_img': imgs[0].unsqueeze(0).unsqueeze(0), # [1, 1, 132, 200, 3]
+        'ref_intrin': in_intrin[ref_idx].unsqueeze(0), # [1, 3, 3]
+        'ref_cfw': in_cfw[ref_idx].unsqueeze(0), # [1, 4, 4]
+        'ref_wfc': in_wfc[ref_idx].unsqueeze(0), # [1, 3, 3]
+        'tgt_intrin': in_intrin[tgx_idx].unsqueeze(0).unsqueeze(0), # [1, 3, 3]
+        'tgt_cfw': in_cfw[tgx_idx].unsqueeze(0).unsqueeze(0), # [1, 4, 4]
+        'tgt_img': imgs[tgx_idx].unsqueeze(0).unsqueeze(0), # [1, 1, 132, 200, 3]
     }
     return x
 
